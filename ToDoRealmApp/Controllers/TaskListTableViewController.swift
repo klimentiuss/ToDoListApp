@@ -5,85 +5,121 @@
 //  Created by Daniil Klimenko on 10.07.2022.
 //
 
-import UIKit
+import RealmSwift
+import SwiftUI
 
 class TaskListTableViewController: UITableViewController {
-
+    
+    private var taskLists: Results<TaskList>!
+    
     override func viewDidLoad() {
         super.viewDidLoad()
-
-        // Uncomment the following line to preserve selection between presentations
-        // self.clearsSelectionOnViewWillAppear = false
-
-        // Uncomment the following line to display an Edit button in the navigation bar for this view controller.
-        // self.navigationItem.rightBarButtonItem = self.editButtonItem
+        
+        taskLists = StorageManager.shared.realm.objects(TaskList.self)
+        createTempData()
+        
+        navigationItem.leftBarButtonItem = editButtonItem
     }
-
+    
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        tableView.reloadData()
+    }
+    
     // MARK: - Table view data source
-
-    override func numberOfSections(in tableView: UITableView) -> Int {
-        // #warning Incomplete implementation, return the number of sections
-        return 0
-    }
-
+    
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        // #warning Incomplete implementation, return the number of rows
-        return 0
+        taskLists.count
+    }
+    
+    
+     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+     let cell = tableView.dequeueReusableCell(withIdentifier: "TaskListCell", for: indexPath)
+         let taskList = taskLists[indexPath.row]
+         cell.configure(with: taskList)
+         
+     return cell
+     }
+     
+    // MARK: - Table view delegate
+    
+    override func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        let currentList = taskLists[indexPath.row]
+        let deleteAction = UIContextualAction( style: .destructive, title: "Delete") { _, _, _ in
+            StorageManager.shared.delete(taskList: currentList)
+            tableView.deleteRows(at: [indexPath], with: .automatic)
+            }
+        
+        let editAction = UIContextualAction(style: .normal, title: "Edit") { _, _, isDone in
+            self.showAlert(with: currentList) {
+                tableView.reloadRows(at: [indexPath], with: .automatic)
+            }
+            isDone(true)
+        }
+        
+        let doneAction = UIContextualAction(style: .normal, title: "Done") { _, _, isDone in
+            StorageManager.shared.done(taskList: currentList)
+            tableView.reloadRows(at: [indexPath], with: .automatic)
+            isDone(true)
+        }
+        
+        editAction.backgroundColor = .orange
+        doneAction.backgroundColor = #colorLiteral(red: 0.3411764801, green: 0.6235294342, blue: 0.1686274558, alpha: 1)
+        
+        return UISwipeActionsConfiguration(actions: [doneAction,editAction, deleteAction])
     }
 
-    /*
-    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "reuseIdentifier", for: indexPath)
-
-        // Configure the cell...
-
-        return cell
-    }
-    */
-
-    /*
-    // Override to support conditional editing of the table view.
-    override func tableView(_ tableView: UITableView, canEditRowAt indexPath: IndexPath) -> Bool {
-        // Return false if you do not want the specified item to be editable.
-        return true
-    }
-    */
-
-    /*
-    // Override to support editing the table view.
-    override func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
-        if editingStyle == .delete {
-            // Delete the row from the data source
-            tableView.deleteRows(at: [indexPath], with: .fade)
-        } else if editingStyle == .insert {
-            // Create a new instance of the appropriate class, insert it into the array, and add a new row to the table view
-        }    
-    }
-    */
-
-    /*
-    // Override to support rearranging the table view.
-    override func tableView(_ tableView: UITableView, moveRowAt fromIndexPath: IndexPath, to: IndexPath) {
-
-    }
-    */
-
-    /*
-    // Override to support conditional rearranging of the table view.
-    override func tableView(_ tableView: UITableView, canMoveRowAt indexPath: IndexPath) -> Bool {
-        // Return false if you do not want the item to be re-orderable.
-        return true
-    }
-    */
-
-    /*
-    // MARK: - Navigation
-
-    // In a storyboard-based application, you will often want to do a little preparation before navigation
+    
     override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
-        // Get the new view controller using segue.destination.
-        // Pass the selected object to the new view controller.
+        guard let indexPath = tableView.indexPathForSelectedRow else { return }
+        let taskList = taskLists[indexPath.row]
+        
+        guard let tasksVC = segue.destination as? TaskTableViewController else { return }
+        tasksVC.taskList = taskList
     }
-    */
+    
+    @IBAction func addButtonPressed(_ sender: Any) {
+        showAlert()
+    }
+    
+    @IBAction func sortedList(_ sender: UISegmentedControl) {
+        taskLists = sender.selectedSegmentIndex == 0
+        ? taskLists.sorted(byKeyPath: "date")
+        : taskLists.sorted(byKeyPath: "name")
+        tableView.reloadData()
+    }
+    
+    private func createTempData() {
+        DataManager.shared.createTempData {
+            self.tableView.reloadData()
+        }
+    }
+    
+}
 
+extension TaskListTableViewController {
+    private func showAlert(with taskList: TaskList? = nil, completion: (()-> Void)? = nil) {
+        
+        let title = taskList != nil ? "Edit List" : "New List"
+        let alert = UIAlertController.createAlert(withTitle: title, andMessage: "What to do?")
+        
+        alert.action(with: taskList) {newValue in
+            if let taskList = taskList, let completion = completion {
+                StorageManager.shared.edit(taskList: taskList, newValue: newValue)
+                completion()
+            } else {
+                self.save(taskList: newValue)
+            }
+        }
+        
+        present(alert, animated: true)
+    }
+    
+    private func save(taskList: String) {
+        let taskList = TaskList(value: [taskList])
+        
+        StorageManager.shared.save(taskList: taskList)
+        let rowIndex = IndexPath.init(row: taskLists.count - 1, section: 0)
+        tableView.insertRows(at: [rowIndex], with: .automatic)
+    }
 }

@@ -5,85 +5,131 @@
 //  Created by Daniil Klimenko on 10.07.2022.
 //
 
-import UIKit
+import RealmSwift
 
 class TaskTableViewController: UITableViewController {
+    
+    var taskList: TaskList!
 
+    private var currentTasks: Results<Task>!
+    private var completedTasks: Results<Task>!
+    
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        // Uncomment the following line to preserve selection between presentations
-        // self.clearsSelectionOnViewWillAppear = false
-
-        // Uncomment the following line to display an Edit button in the navigation bar for this view controller.
-        // self.navigationItem.rightBarButtonItem = self.editButtonItem
+        title = taskList.name
+        currentTasks = taskList.tasks.filter("isComplete = false")
+        completedTasks = taskList.tasks.filter("isComplete = true")
+        
+        let addButton = UIBarButtonItem(
+            barButtonSystemItem: .add,
+            target: self,
+            action: #selector(addButtonPressed))
+        navigationItem.rightBarButtonItems = [addButton, editButtonItem]
     }
 
     // MARK: - Table view data source
 
     override func numberOfSections(in tableView: UITableView) -> Int {
-        // #warning Incomplete implementation, return the number of sections
-        return 0
+        2
     }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        // #warning Incomplete implementation, return the number of rows
-        return 0
+        section == 0 ? currentTasks.count : completedTasks.count
     }
 
-    /*
+    override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
+        section == 0 ? "Current tasks" : "Completed tasks"
+    }
+    
+    
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "reuseIdentifier", for: indexPath)
+        let cell = tableView.dequeueReusableCell(withIdentifier: "TasksCell", for: indexPath)
+        let task = indexPath.section == 0
+        ? currentTasks[indexPath.row]
+        : completedTasks[indexPath.row]
 
-        // Configure the cell...
-
+        var content = cell.defaultContentConfiguration()
+        content.text = task.name
+        content.secondaryText = task.note
+        cell.contentConfiguration = content
+        
         return cell
     }
-    */
 
-    /*
-    // Override to support conditional editing of the table view.
-    override func tableView(_ tableView: UITableView, canEditRowAt indexPath: IndexPath) -> Bool {
-        // Return false if you do not want the specified item to be editable.
-        return true
+    // MARK: - Table view delegate
+    
+    override func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        let task = indexPath.section == 0
+        ? currentTasks[indexPath.row]
+        : completedTasks[indexPath.row]
+        
+        let deleteAction = UIContextualAction( style: .destructive, title: "Delete") { _, _, _ in
+            StorageManager.shared.deleteTask(task: task)
+            tableView.deleteRows(at: [indexPath], with: .automatic)
+            }
+        
+        let editAction = UIContextualAction(style: .normal, title: "Edit") { _, _, isDone in
+            self.showAlert(with: task) {
+                tableView.reloadRows(at: [indexPath], with: .automatic)
+            }
+            isDone(true)
+        }
+        let doneTitle = indexPath.section == 0 ? "Done" : "Undone"
+        
+        let doneAction = UIContextualAction(style: .normal, title: doneTitle) { _, _, isDone in
+            StorageManager.shared.doneTask(task: task)
+            
+            let indexPathForCurrentTask = IndexPath(row: self.currentTasks.count - 1, section: 0)
+            let indexPathForCompletedTask = IndexPath(row: self.completedTasks.count - 1, section: 1)
+            
+            let destinationIndexRow = indexPath.section == 0
+            ? indexPathForCompletedTask
+            : indexPathForCurrentTask
+            
+            
+            tableView.moveRow(at: indexPath, to: destinationIndexRow)
+            isDone(true)
+        }
+        
+        editAction.backgroundColor = .orange
+        doneAction.backgroundColor = #colorLiteral(red: 0.3411764801, green: 0.6235294342, blue: 0.1686274558, alpha: 1)
+        
+        return UISwipeActionsConfiguration(actions: [doneAction,editAction, deleteAction])
     }
-    */
-
-    /*
-    // Override to support editing the table view.
-    override func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
-        if editingStyle == .delete {
-            // Delete the row from the data source
-            tableView.deleteRows(at: [indexPath], with: .fade)
-        } else if editingStyle == .insert {
-            // Create a new instance of the appropriate class, insert it into the array, and add a new row to the table view
-        }    
+    
+    
+   @objc private func addButtonPressed() {
+        showAlert()
     }
-    */
-
-    /*
-    // Override to support rearranging the table view.
-    override func tableView(_ tableView: UITableView, moveRowAt fromIndexPath: IndexPath, to: IndexPath) {
-
-    }
-    */
-
-    /*
-    // Override to support conditional rearranging of the table view.
-    override func tableView(_ tableView: UITableView, canMoveRowAt indexPath: IndexPath) -> Bool {
-        // Return false if you do not want the item to be re-orderable.
-        return true
-    }
-    */
-
-    /*
-    // MARK: - Navigation
-
-    // In a storyboard-based application, you will often want to do a little preparation before navigation
-    override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
-        // Get the new view controller using segue.destination.
-        // Pass the selected object to the new view controller.
-    }
-    */
-
+    
 }
+
+extension TaskTableViewController {
+    
+    private func showAlert(with task: Task? = nil, completion: (() -> Void)? = nil){
+        
+        let title = task != nil ? "Edit Task" : "New Task"
+        let alert = UIAlertController.createAlert(withTitle: title, andMessage: "What to do?")
+        
+        alert.action(with: task) { newValue, note in
+            
+            if let task = task, let completion = completion {
+                StorageManager.shared.editTask(task: task, name: newValue, note: note)
+                completion()
+            } else {
+            self.saveTask(withName: newValue, andNote: note)
+            }
+        }
+        present(alert, animated: true)
+        
+    }
+    private func saveTask(withName name: String, andNote note: String) {
+        let task = Task(value: [name, note])
+        
+        StorageManager.shared.saveTask(task: task, in: taskList)
+        let rowIndex = IndexPath(row: currentTasks.count - 1, section: 0)
+        tableView.insertRows(at: [rowIndex], with: .automatic)
+    }
+}
+
